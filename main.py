@@ -3,35 +3,39 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# ✅ CORS CONFIGURATION
+# ✅ CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",              # Local frontend
-        "https://nimzo-frontend.vercel.app",  # Vercel frontend (future)
+        "http://localhost:3000",
+        "https://nimzo-frontend.vercel.app"
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ✅ TEST ROUTE
+# ✅ ROOT CHECK
 @app.get("/")
 def root():
-    return {"status": "NIMZO backend running"}
+    return {"status": "Nimzo backend running"}
 
-# ✅ SAMPLE API (example)
+# ✅ CATEGORIES API
 @app.get("/api/categories")
 def get_categories():
     return [
-        {"id": 1, "name": "Groceries"},
+        {"id": 1, "name": "Vegetables"},
         {"id": 2, "name": "Fruits"},
-        {"id": 3, "name": "Vegetables"},
+        {"id": 3, "name": "Dairy"}
     ]
 
+# ✅ PRODUCTS API
 @app.get("/api/products")
 def get_products(limit: int = 20):
-    return [
+    products = [
         {"id": 1, "name": "Aashirvaad Atta 5kg", "price": 350},
-        {"id": 2, "name": "Amul Milk 500ml", "price": 28},
-    ][:limit]
+        {"id": 2, "name": "Amul Milk 500ml", "price": 30},
+        {"id": 3, "name": "Tata Salt 1kg", "price": 28},
+        {"id": 4, "name": "Fortune Oil 1L", "price": 160},
+    ]
+    return products[:limit]
