@@ -1,13 +1,17 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Optional
 
-app = FastAPI()
+app = FastAPI(title="Nimzo Backend API")
 
-# ✅ CORS
+# ======================
+# CORS CONFIG
+# ======================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
+        "http://127.0.0.1:3000",
         "https://nimzo-frontend.vercel.app"
     ],
     allow_credentials=True,
@@ -15,24 +19,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ------------------------
-# MOCK DATA
-# ------------------------
-
-categories = [
+# ======================
+# DUMMY DATA
+# ======================
+CATEGORIES = [
     {"id": 1, "name": "Groceries"},
     {"id": 2, "name": "Fruits"},
     {"id": 3, "name": "Vegetables"},
 ]
 
-products = [
+PRODUCTS = [
     {
         "id": 1,
         "name": "Aashirvaad Atta 5kg",
         "price": 320,
         "category": "Groceries",
         "image": "https://via.placeholder.com/150",
-        "in_stock": True
+        "in_stock": True,
     },
     {
         "id": 2,
@@ -40,7 +43,7 @@ products = [
         "price": 28,
         "category": "Groceries",
         "image": "https://via.placeholder.com/150",
-        "in_stock": True
+        "in_stock": True,
     },
     {
         "id": 3,
@@ -48,7 +51,7 @@ products = [
         "price": 140,
         "category": "Fruits",
         "image": "https://via.placeholder.com/150",
-        "in_stock": True
+        "in_stock": True,
     },
     {
         "id": 4,
@@ -56,31 +59,45 @@ products = [
         "price": 40,
         "category": "Vegetables",
         "image": "https://via.placeholder.com/150",
-        "in_stock": False
+        "in_stock": False,
     },
 ]
 
-# ------------------------
-# APIs
-# ------------------------
-
+# ======================
+# HEALTH CHECK
+# ======================
 @app.get("/")
 def root():
-    return {"message": "Nimzo Backend is Live 🚀"}
+    return {"status": "Nimzo backend running 🚀"}
 
+# ======================
+# CATEGORIES API
+# ======================
 @app.get("/api/categories")
 def get_categories():
-    return categories
+    return CATEGORIES
 
+# ======================
+# PRODUCTS API
+# ======================
 @app.get("/api/products")
-def get_products(category: str | None = None):
-    if category:
-        return [p for p in products if p["category"] == category]
-    return products
+def get_products(
+    category: Optional[str] = None,
+    limit: int = 20
+):
+    data = PRODUCTS
 
+    if category:
+        data = [p for p in data if p["category"].lower() == category.lower()]
+
+    return data[:limit]
+
+# ======================
+# PRODUCT DETAIL API
+# ======================
 @app.get("/api/products/{product_id}")
-def get_product(product_id: int):
-    for product in products:
+def get_product_by_id(product_id: int):
+    for product in PRODUCTS:
         if product["id"] == product_id:
             return product
     raise HTTPException(status_code=404, detail="Product not found")
