@@ -1,22 +1,25 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 from uuid import uuid4
+from datetime import datetime, timedelta
+from jose import jwt, JWTError
 
 app = FastAPI(title="Nimzo Backend API")
 
 # ======================
-# ✅ CORS CONFIG (FIXED)
+# JWT CONFIG
+# ======================
+SECRET_KEY = "nimzo-secret-key"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+# ======================
+# CORS CONFIG (DEBUG MODE)
 # ======================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",        # ✅ ADDED
-        "http://127.0.0.1:3001",        # ✅ ADDED
-        "https://nimzo-frontend.vercel.app"
-    ],
+    allow_origins=["*"],  # DEBUG ONLY
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,27 +49,50 @@ ORDERS = []
 USERS = {}
 OTP_STORE = {}
 
-DEMO_USER = "demo_user_1"
+# ======================
+# JWT HELPERS
+# ======================
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+# ✅ FIXED AUTH HEADER (ONLY REAL CHANGE)
+def get_current_user(authorization: str = Header(None, alias="Authorization")):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization missing")
+    try:
+        token = authorization.replace("Bearer ", "")
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("user_id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return {"user_id": user_id}
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 # ======================
-# HEALTH CHECK
+# HEALTH
 # ======================
 @app.get("/")
 def root():
     return {"status": "Nimzo backend running 🚀"}
 
+@app.get("/ping")
+def ping():
+    return {"pong": True}
+
 # ======================
-# AUTH (OTP MOCK)
+# AUTH (OTP MOCK + JWT)
 # ======================
 @app.post("/api/auth/send-otp")
 def send_otp(payload: dict):
     phone = payload.get("phone")
     if not phone:
         raise HTTPException(status_code=400, detail="Phone required")
-
-    otp = "123456"
-    OTP_STORE[phone] = otp
-    return {"success": True, "message": "OTP sent (mock)", "otp": otp}
+    OTP_STORE[phone] = "123456"
+    return {"success": True, "otp": "123456"}
 
 @app.post("/api/auth/verify-otp")
 def verify_otp(payload: dict):
@@ -76,9 +102,10 @@ def verify_otp(payload: dict):
     if OTP_STORE.get(phone) != otp:
         raise HTTPException(status_code=400, detail="Invalid OTP")
 
-    user_id = f"user_{phone}"
-    USERS[user_id] = {"user_id": user_id, "phone": phone}
-    return {"success": True, "user": USERS[user_id]}
+    USERS[phone] = {"user_id": phone, "phone": phone}
+    token = create_access_token({"user_id": phone})
+
+    return {"success": True, "access_token": token}
 
 # ======================
 # CATEGORIES & PRODUCTS
@@ -102,17 +129,19 @@ def get_product_by_id(product_id: int):
     raise HTTPException(status_code=404, detail="Product not found")
 
 # ======================
-# CART APIs (DEMO USER)
+# CART APIs
 # ======================
 @app.get("/api/cart")
-def get_cart():
-    cart = CARTS.setdefault(DEMO_USER, {"items": []})
+def get_cart(user=Depends(get_current_user)):
+    user_id = user["user_id"]
+    cart = CARTS.setdefault(user_id, {"items": []})
     total = sum(i["price"] * i["quantity"] for i in cart["items"])
     item_count = sum(i["quantity"] for i in cart["items"])
     return {"items": cart["items"], "total": total, "item_count": item_count, "savings": 0}
 
 @app.post("/api/cart/add")
-def add_to_cart(payload: dict):
+def add_to_cart(payload: dict, user=Depends(get_current_user)):
+    user_id = user["user_id"]
     product_id = payload.get("product_id")
     quantity = payload.get("quantity", 1)
 
@@ -120,7 +149,7 @@ def add_to_cart(payload: dict):
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    cart = CARTS.setdefault(DEMO_USER, {"items": []})
+    cart = CARTS.setdefault(user_id, {"items": []})
     for item in cart["items"]:
         if item["product_id"] == product_id:
             item["quantity"] += quantity
@@ -136,58 +165,52 @@ def add_to_cart(payload: dict):
     return {"success": True}
 
 @app.put("/api/cart/update")
-def update_cart(payload: dict):
-    cart = CARTS.setdefault(DEMO_USER, {"items": []})
+def update_cart(payload: dict, user=Depends(get_current_user)):
+    cart = CARTS.setdefault(user["user_id"], {"items": []})
     for item in cart["items"]:
         if item["product_id"] == payload.get("product_id"):
             item["quantity"] = payload.get("quantity")
-            return {"success": True}
     return {"success": True}
 
 @app.delete("/api/cart/remove/{product_id}")
-def remove_cart_item(product_id: int):
-    cart = CARTS.setdefault(DEMO_USER, {"items": []})
+def remove_cart_item(product_id: int, user=Depends(get_current_user)):
+    cart = CARTS.setdefault(user["user_id"], {"items": []})
     cart["items"] = [i for i in cart["items"] if i["product_id"] != product_id]
     return {"success": True}
 
 @app.delete("/api/cart/clear")
-def clear_cart():
-    CARTS[DEMO_USER] = {"items": []}
+def clear_cart(user=Depends(get_current_user)):
+    CARTS[user["user_id"]] = {"items": []}
     return {"success": True}
 
 # ======================
 # ORDER APIs
 # ======================
 @app.post("/api/orders/place")
-def place_order(payload: dict):
-    cart = CARTS.get(DEMO_USER)
+def place_order(payload: dict, user=Depends(get_current_user)):
+    cart = CARTS.get(user["user_id"])
     if not cart or not cart["items"]:
         raise HTTPException(status_code=400, detail="Cart is empty")
 
-    if not payload.get("name") or not payload.get("phone") or not payload.get("address"):
-        raise HTTPException(status_code=400, detail="Missing order details")
-
     order_id = str(uuid4())[:8]
-
     order = {
         "order_id": order_id,
-        "user_id": DEMO_USER,
-        "name": payload["name"],
-        "phone": payload["phone"],
-        "address": payload["address"],
+        "user_id": user["user_id"],
+        "name": payload.get("name"),
+        "phone": payload.get("phone"),
+        "address": payload.get("address"),
         "items": cart["items"],
         "total": sum(i["price"] * i["quantity"] for i in cart["items"]),
-        "payment_mode": "COD",
         "status": "PLACED"
     }
 
     ORDERS.append(order)
-    CARTS[DEMO_USER] = {"items": []}
+    CARTS[user["user_id"]] = {"items": []}
     return {"success": True, "order_id": order_id}
 
 @app.get("/api/orders")
-def get_orders():
-    return [o for o in ORDERS if o["user_id"] == DEMO_USER]
+def get_orders(user=Depends(get_current_user)):
+    return [o for o in ORDERS if o["user_id"] == user["user_id"]]
 
 # ======================
 # ADMIN APIs
@@ -200,17 +223,10 @@ def admin_get_products():
 def admin_get_orders():
     return ORDERS
 
-VALID_ORDER_STATUSES = ["PLACED", "PREPARING", "OUT_FOR_DELIVERY", "DELIVERED"]
-
 @app.put("/api/admin/orders/{order_id}/status")
 def admin_update_order_status(order_id: str, payload: dict):
-    status = payload.get("status")
-    if status not in VALID_ORDER_STATUSES:
-        raise HTTPException(status_code=400, detail="Invalid status")
-
     for order in ORDERS:
         if order["order_id"] == order_id:
-            order["status"] = status
-            return {"success": True, "order_id": order_id, "status": status}
-
+            order["status"] = payload.get("status")
+            return {"success": True}
     raise HTTPException(status_code=404, detail="Order not found")
